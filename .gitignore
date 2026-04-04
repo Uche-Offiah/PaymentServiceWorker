@@ -1,0 +1,11 @@
+node_modules
+dist
+.env
+*.log
+coverage
+.vscode
+.DS_Stores
+.vs
+bin
+obj
+log.txt
