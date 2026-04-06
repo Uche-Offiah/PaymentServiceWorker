@@ -1,4 +1,5 @@
 ﻿using PaymentService.Worker.Entities;
+using PaymentService.Worker.Models;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -9,7 +10,7 @@ namespace PaymentService.Worker.Repositories
 {
     public interface IPaymentRepository
     {
-        Task<bool> ExistAsync();
+        Task<bool> ExistAsync(Guid OrderId);
         Task SaveAsync (Payment payment);
     }
 }

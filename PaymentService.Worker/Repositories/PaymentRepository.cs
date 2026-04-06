@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 
 namespace PaymentService.Worker.Repositories
 {
-    public class PaymentRepository
+    public class PaymentRepository : IPaymentRepository
     {
         private readonly AppDbContext _context;
         public PaymentRepository(AppDbContext context)
