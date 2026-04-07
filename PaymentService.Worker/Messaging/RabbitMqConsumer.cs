@@ -31,12 +31,20 @@ namespace PaymentService.Worker.Messaging
             using var channel = await connection.CreateChannelAsync();
 
             var queueName = nameof(OrderCreatedEvent);
+            var deadLetterQueue = $"{queueName}_dlq";
+
+            var args = new Dictionary<string, object>
+            {
+                {"x-dead-letter-exchange", "" },
+                {"x-dead-letter-routing-key", deadLetterQueue},
+            };
 
             await channel.QueueDeclareAsync(
                 queue: queueName,
                 durable: true,
                 exclusive: false,
-                autoDelete: false
+                autoDelete: false,
+                arguments: args
              );
 
             var consumer =  new AsyncEventingBasicConsumer(channel);
@@ -70,6 +78,16 @@ namespace PaymentService.Worker.Messaging
             }; 
 
             await channel.BasicConsumeAsync(queueName, autoAck: true, consumer: consumer);
+
+            
+
+            //var handler = new HttpClientHandler
+            //{
+            //    SslProtocols = System.Security.Authentication.SslProtocols.Tls13
+            //};
+
+            //var client = new HttpClient(handler);
+            //var response = await client.GetAsync("https://google.com");
 
             return;
 
