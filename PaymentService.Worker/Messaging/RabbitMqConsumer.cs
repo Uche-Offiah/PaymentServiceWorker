@@ -8,6 +8,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 
 namespace PaymentService.Worker.Messaging
@@ -59,35 +60,75 @@ namespace PaymentService.Worker.Messaging
 
                 var evt = JsonSerializer.Deserialize<OrderCreatedEvent>(message);
 
-                if (await repo.ExistAsync(evt.OrderId))
+                //get retry count from header
+                int retryCount = 0;
+                if (ea.BasicProperties.Headers != null && ea.BasicProperties.Headers.TryGetValue("x-retry", out var retryObj))
                 {
-                    return;
+                    var retryBytes = retryObj as byte[];
+
+                    if (retryBytes != null && retryBytes.Length > 0)
+                    {
+                        retryCount = retryBytes[0];
+                    }
                 }
 
-                var payment = new Payment
+                try
                 {
-                    Id = new Guid(),
-                    OrderId = evt.OrderId,
-                    Amount = evt.Amount,
-                    ProcessedAt = DateTime.UtcNow
-                };
+                    // Idempotency checks
+                    if (await repo.ExistAsync(evt.OrderId))
+                    {
+                        await channel.BasicAckAsync(ea.DeliveryTag, false);
+                        return;
+                    }
 
-                await repo.SaveAsync(payment);
+                    var payment = new Payment
+                    {
+                        Id = new Guid(),
+                        OrderId = evt.OrderId,
+                        Amount = evt.Amount,
+                        ProcessedAt = DateTime.UtcNow
+                    };
 
-                Console.WriteLine($"Payment processed for Order {evt.OrderId}");
+                    await repo.SaveAsync(payment);
+
+                    Console.WriteLine($"Payment processed for Order {evt.OrderId}");
+
+                    await channel.BasicAckAsync(ea.DeliveryTag, false);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Error processing message: {ex.Message}");
+
+                    if (retryCount >= 3)
+                    {
+                        // Move to DLQ
+                        await channel.BasicRejectAsync(ea.DeliveryTag, false);
+                    }
+                    else
+                    {
+                        var props = new BasicProperties();
+                        props.Headers = new Dictionary<string, object?>
+                        {
+                            { "x-retry", new byte[] { (byte)(retryCount + 1)} }
+                        };
+
+                        await channel.BasicPublishAsync(
+                            exchange: "",
+                            routingKey: nameof(OrderCreatedEvent),
+                            mandatory: true,
+                            basicProperties: props,
+                            body: ea.Body
+                         );
+
+                        await channel.BasicAckAsync(ea.DeliveryTag, false);
+                    }
+                }
+
+                
+
             }; 
 
             await channel.BasicConsumeAsync(queueName, autoAck: true, consumer: consumer);
-
-            
-
-            //var handler = new HttpClientHandler
-            //{
-            //    SslProtocols = System.Security.Authentication.SslProtocols.Tls13
-            //};
-
-            //var client = new HttpClient(handler);
-            //var response = await client.GetAsync("https://google.com");
 
             return;
 
