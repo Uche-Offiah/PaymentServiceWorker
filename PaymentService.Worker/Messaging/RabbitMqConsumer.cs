@@ -28,13 +28,19 @@ namespace PaymentService.Worker.Messaging
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            using var connection = await _connectionFactory.CreateConnectionAsync();
-            using var channel = await connection.CreateChannelAsync();
+            Console.WriteLine("RabbitMQ Consumer started...");
+            var connection = await _connectionFactory.CreateConnectionAsync();
+            var channel = await connection.CreateChannelAsync();
+
+            Console.WriteLine("RabbitMQ connection created");
 
             var queueName = nameof(OrderCreatedEvent);
             var deadLetterQueue = $"{queueName}_dlq";
 
-            var args = new Dictionary<string, object>
+            //Declare DLQ
+            await channel.QueueDeclareAsync(deadLetterQueue, true, false, false);
+
+            var args = new Dictionary<string, object?>
             {
                 {"x-dead-letter-exchange", "" },
                 {"x-dead-letter-routing-key", deadLetterQueue},
@@ -47,6 +53,8 @@ namespace PaymentService.Worker.Messaging
                 autoDelete: false,
                 arguments: args
              );
+
+             Console.WriteLine("Queues declared successfully");
 
             var consumer =  new AsyncEventingBasicConsumer(channel);
 
@@ -83,7 +91,7 @@ namespace PaymentService.Worker.Messaging
 
                     var payment = new Payment
                     {
-                        Id = new Guid(),
+                        Id = Guid.NewGuid(),
                         OrderId = evt.OrderId,
                         Amount = evt.Amount,
                         ProcessedAt = DateTime.UtcNow
@@ -128,9 +136,9 @@ namespace PaymentService.Worker.Messaging
 
             }; 
 
-            await channel.BasicConsumeAsync(queueName, autoAck: true, consumer: consumer);
+            await channel.BasicConsumeAsync(queueName, autoAck: false, consumer: consumer);
 
-            return;
+            await Task.Delay(Timeout.Infinite, stoppingToken);
 
         }
     }
