@@ -10,7 +10,7 @@ var builder = Host.CreateApplicationBuilder(args);
 builder.Services.AddHostedService<Worker>();
 builder.Services.AddDbContext<AppDbContext>(options => options.UseInMemoryDatabase("PaymentDb"));
 builder.Services.AddScoped<IPaymentRepository, PaymentRepository>();
-builder.Services.AddScoped<RabbitMqConsumer>();
+builder.Services.AddHostedService<RabbitMqConsumer>();
 
 var host = builder.Build();
 
