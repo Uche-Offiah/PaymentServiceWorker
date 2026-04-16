@@ -29,6 +29,28 @@ namespace PaymentService.Worker.Messaging
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             Console.WriteLine("RabbitMQ Consumer started...");
+
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                try
+                {
+                    await StartConsumer(stoppingToken);
+
+                    // Block until something fails
+                    await Task.Delay(Timeout.Infinite, stoppingToken);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Connection lost: {ex.Message}");
+                }
+
+                Console.WriteLine("Reconnecting in 5 seconds...");
+                await Task.Delay(5000, stoppingToken);
+            }
+        }
+
+        private async Task StartConsumer(CancellationToken stoppingToken)
+        {
             var connection = await _connectionFactory.CreateConnectionAsync();
             var channel = await connection.CreateChannelAsync();
 
@@ -37,52 +59,51 @@ namespace PaymentService.Worker.Messaging
             var queueName = nameof(OrderCreatedEvent);
             var deadLetterQueue = $"{queueName}_dlq";
 
-            //Declare DLQ
+            // Declare DLQ
             await channel.QueueDeclareAsync(deadLetterQueue, true, false, false);
 
             var args = new Dictionary<string, object?>
             {
-                {"x-dead-letter-exchange", "" },
-                {"x-dead-letter-routing-key", deadLetterQueue},
+                { "x-dead-letter-exchange", "" },
+                { "x-dead-letter-routing-key", deadLetterQueue },
             };
 
-            await channel.QueueDeclareAsync(
-                queue: queueName,
-                durable: true,
-                exclusive: false,
-                autoDelete: false,
-                arguments: args
-             );
+            await channel.QueueDeclareAsync(queueName, true, false, false, args);
 
-             Console.WriteLine("Queues declared successfully");
+            Console.WriteLine("Queues declared successfully");
 
-            var consumer =  new AsyncEventingBasicConsumer(channel);
+            // 🔥 ADD THIS (important)
+            await channel.BasicQosAsync(0, 1, false);
+
+            var consumer = new AsyncEventingBasicConsumer(channel);
 
             consumer.ReceivedAsync += async (model, ea) =>
             {
                 using var scope = _serviceProvider.CreateScope();
                 var repo = scope.ServiceProvider.GetRequiredService<IPaymentRepository>();
 
-                var body = ea.Body.ToArray();
-                var message = Encoding.UTF8.GetString(body);
-
+                var message = Encoding.UTF8.GetString(ea.Body.ToArray());
                 var evt = JsonSerializer.Deserialize<OrderCreatedEvent>(message);
 
-                //get retry count from header
-                int retryCount = 0;
-                if (ea.BasicProperties.Headers != null && ea.BasicProperties.Headers.TryGetValue("x-retry", out var retryObj))
+                if (evt == null)
                 {
-                    var retryBytes = retryObj as byte[];
+                    await channel.BasicAckAsync(ea.DeliveryTag, false);
+                    return;
+                }
 
-                    if (retryBytes != null && retryBytes.Length > 0)
-                    {
-                        retryCount = retryBytes[0];
-                    }
+                int retryCount = 0;
+
+                var headers = ea.BasicProperties?.Headers;
+                if (headers != null &&
+                    headers.TryGetValue("x-retry", out var retryObj) &&
+                    retryObj is byte[] bytes &&
+                    bytes.Length > 0)
+                {
+                    retryCount = bytes[0];
                 }
 
                 try
                 {
-                    // Idempotency checks
                     if (await repo.ExistAsync(evt.OrderId))
                     {
                         await channel.BasicAckAsync(ea.DeliveryTag, false);
@@ -105,41 +126,39 @@ namespace PaymentService.Worker.Messaging
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"Error processing message: {ex.Message}");
+                    Console.WriteLine($"Error: {ex.Message}");
 
                     if (retryCount >= 3)
                     {
-                        // Move to DLQ
                         await channel.BasicRejectAsync(ea.DeliveryTag, false);
                     }
                     else
                     {
-                        var props = new BasicProperties();
-                        props.Headers = new Dictionary<string, object?>
+                        var props = new BasicProperties
                         {
-                            { "x-retry", new byte[] { (byte)(retryCount + 1)} }
+                            Headers = new Dictionary<string, object?>
+                            {
+                                ["x-retry"] = new byte[] { (byte)(retryCount + 1) }
+                            }
                         };
 
                         await channel.BasicPublishAsync(
-                            exchange: "",
-                            routingKey: nameof(OrderCreatedEvent),
-                            mandatory: true,
-                            basicProperties: props,
-                            body: ea.Body
-                         );
+                            "",
+                            queueName,
+                            false,
+                            props,
+                            ea.Body
+                        );
 
                         await channel.BasicAckAsync(ea.DeliveryTag, false);
                     }
                 }
+            };
 
-                
+            await channel.BasicConsumeAsync(queueName, false, consumer);
 
-            }; 
-
-            await channel.BasicConsumeAsync(queueName, autoAck: false, consumer: consumer);
-
-            await Task.Delay(Timeout.Infinite, stoppingToken);
-
+            Console.WriteLine("Consumer started");
         }
+
     }
 }
