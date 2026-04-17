@@ -18,12 +18,16 @@ namespace PaymentService.Worker.Messaging
         private readonly IServiceProvider _serviceProvider;
         private readonly ConnectionFactory _connectionFactory;
 
-        public RabbitMqConsumer(IServiceProvider serviceProvider)
+        private readonly ILogger<RabbitMqConsumer> _logger;
+
+        public RabbitMqConsumer(IServiceProvider serviceProvider, ILogger<RabbitMqConsumer> logger)
         {
             _connectionFactory = new ConnectionFactory()
             {
                 HostName = "localhost",
             };
+            _serviceProvider = serviceProvider;
+            _logger = logger;
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -42,9 +46,10 @@ namespace PaymentService.Worker.Messaging
                 catch (Exception ex)
                 {
                     Console.WriteLine($"Connection lost: {ex.Message}");
+                    _logger.LogError(ex, "Connection lost ");
                 }
 
-                Console.WriteLine("Reconnecting in 5 seconds...");
+                _logger.LogInformation("Reconnecting in 5 seconds...");
                 await Task.Delay(5000, stoppingToken);
             }
         }
@@ -72,7 +77,7 @@ namespace PaymentService.Worker.Messaging
 
             Console.WriteLine("Queues declared successfully");
 
-            // 🔥 ADD THIS (important)
+            // Quality of service
             await channel.BasicQosAsync(0, 1, false);
 
             var consumer = new AsyncEventingBasicConsumer(channel);
@@ -121,12 +126,15 @@ namespace PaymentService.Worker.Messaging
                     await repo.SaveAsync(payment);
 
                     Console.WriteLine($"Payment processed for Order {evt.OrderId}");
+                    _logger.LogInformation("Payment processed for Order {OrderId}", evt.OrderId);
+                    
 
                     await channel.BasicAckAsync(ea.DeliveryTag, false);
                 }
                 catch (Exception ex)
                 {
                     Console.WriteLine($"Error: {ex.Message}");
+                    _logger.LogError(ex, "Error processing message");
 
                     if (retryCount >= 3)
                     {
@@ -157,7 +165,7 @@ namespace PaymentService.Worker.Messaging
 
             await channel.BasicConsumeAsync(queueName, false, consumer);
 
-            Console.WriteLine("Consumer started");
+            _logger.LogInformation("Consumer started....");
         }
 
     }
