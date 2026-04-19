@@ -1,19 +1,23 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using PaymentService.Worker;
+using PaymentService.Worker.Data;
 using PaymentService.Worker.Messaging;
 using PaymentService.Worker.Repositories;
-using Microsoft.Extensions.Configuration;
-using PaymentService.Worker.Data;
-using Microsoft.EntityFrameworkCore;
 using Serilog;
+using Serilog.Events;
 
 var builder = Host.CreateApplicationBuilder(args);
 
 Log.Logger = new LoggerConfiguration()
-    .Enrich.FromLogContext()
     .WriteTo.Console()
     .CreateBootstrapLogger();
 
-builder.Services.AddSerilog();
+builder.Services.AddSerilog((services, lc) => lc
+    .MinimumLevel.Information()
+    .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
+    .WriteTo.Console()
+    .Enrich.FromLogContext());
 
 builder.Services.AddHostedService<Worker>();
 builder.Services.AddDbContext<AppDbContext>(options => options.UseInMemoryDatabase("PaymentDb"));
