@@ -36,25 +36,42 @@ namespace PaymentService.Worker.Messaging
 
             while (!stoppingToken.IsCancellationRequested)
             {
+                IConnection? connection = null;
+                IChannel? channel = null;
                 try
                 {
-                    await StartConsumer(stoppingToken);
+                    (connection, channel) = await StartConsumer(stoppingToken);
 
-                    // Block until something fails
-                    await Task.Delay(Timeout.Infinite, stoppingToken);
+                    while (!stoppingToken.IsCancellationRequested)
+                    {
+                        if (connection == null || channel == null ||
+                            connection.IsOpen == false || channel.IsClosed)
+                        {
+                            throw new Exception("RabbitMQ connection/channel closed");
+                        }
+
+                        await Task.Delay(2000, stoppingToken);
+                    }
                 }
                 catch (Exception ex)
                 {
                     Console.WriteLine($"Connection lost: {ex.Message}");
                     _logger.LogError(ex, "Connection lost ");
                 }
+                finally
+                {
+                    if (channel != null && channel.IsOpen)
+                        await channel.CloseAsync();
 
+                    if (connection != null && connection.IsOpen)
+                        await connection.CloseAsync();
+                }
                 _logger.LogInformation("Reconnecting in 5 seconds...");
                 await Task.Delay(5000, stoppingToken);
             }
         }
 
-        private async Task StartConsumer(CancellationToken stoppingToken)
+        private async Task<(IConnection connection, IChannel channel)> StartConsumer(CancellationToken stoppingToken)
         {
             var connection = await _connectionFactory.CreateConnectionAsync();
             var channel = await connection.CreateChannelAsync();
@@ -166,6 +183,7 @@ namespace PaymentService.Worker.Messaging
             await channel.BasicConsumeAsync(queueName, false, consumer);
 
             _logger.LogInformation("Consumer started....");
+            return (connection, channel);
         }
 
     }
