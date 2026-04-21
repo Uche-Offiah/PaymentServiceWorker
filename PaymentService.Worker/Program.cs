@@ -17,7 +17,8 @@ builder.Services.AddSerilog((services, lc) => lc
     .MinimumLevel.Information()
     .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
     .WriteTo.Console()
-    .Enrich.FromLogContext());
+    .Enrich.FromLogContext()
+);
 
 builder.Services.AddHostedService<Worker>();
 builder.Services.AddDbContext<AppDbContext>(options => options.UseInMemoryDatabase("PaymentDb"));
