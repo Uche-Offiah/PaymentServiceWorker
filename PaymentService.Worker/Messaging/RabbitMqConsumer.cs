@@ -159,6 +159,9 @@ namespace PaymentService.Worker.Messaging
                     }
                     else
                     {
+                        var delay = TimeSpan.FromSeconds(Math.Pow(2, retryCount));
+                        await Task.Delay(delay, stoppingToken);
+
                         var props = new BasicProperties
                         {
                             Headers = new Dictionary<string, object?>
