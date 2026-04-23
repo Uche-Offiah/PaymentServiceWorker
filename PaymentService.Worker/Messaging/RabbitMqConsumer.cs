@@ -24,7 +24,10 @@ namespace PaymentService.Worker.Messaging
         {
             _connectionFactory = new ConnectionFactory()
             {
-                HostName = "localhost",
+                
+                HostName = Environment.GetEnvironmentVariable("RABBITMQ_HOST") ?? "localhost",
+                UserName = Environment.GetEnvironmentVariable("RABBITMQ_USER") ?? "guest",
+                Password = Environment.GetEnvironmentVariable("RABBITMQ_PASS") ?? "guest"
             };
             _serviceProvider = serviceProvider;
             _logger = logger;
